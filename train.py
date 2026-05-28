@@ -7,15 +7,14 @@ from tqdm import tqdm
 
 import torch
 import torch.nn as nn
-import torch.distributed as dist
 import torch.backends.cudnn as cudnn
 from torch.nn.parallel import DistributedDataParallel
 
 from config import config
 from dataloader.dataloader import get_train_loader
-from models.builder import EncoderDecoder as segmodel
+from models.builder import EncoderDecoder as restoration_model
 from dataloader.RGBXDataset import RGBXDataset
-from utils.init_func import init_weight, group_weight
+from utils.init_func import group_weight
 from utils.lr_policy import WarmUpPolyLR
 from engine.engine import Engine
 from engine.logger import get_logger
@@ -48,24 +47,27 @@ with Engine(custom_parser=parser) as engine:
         tb = SummaryWriter(log_dir=tb_dir)
         engine.link_tb(tb_dir, generate_tb_dir)
 
-    # config network and criterion
-    criterion = nn.CrossEntropyLoss(reduction='mean', ignore_index=config.background)
+    # 当前训练闭环：
+    #   image_rgb + polarization_input -> model -> restored_rgb
+    #   restored_rgb 和 clean_target 直接计算 L1Loss。
+    # 这里不再使用 CrossEntropyLoss，因为 clean_target 是 RGB 图像，不是类别 mask。
+    criterion = nn.L1Loss(reduction='mean')
 
     if engine.distributed:
         BatchNorm2d = nn.SyncBatchNorm
     else:
         BatchNorm2d = nn.BatchNorm2d
-    
-    model=segmodel(cfg=config, criterion=criterion, norm_layer=BatchNorm2d)
-    
+
+    model = restoration_model(cfg=config, norm_layer=BatchNorm2d)
+
     # group weight and config optimizer
     base_lr = config.lr
     if engine.distributed:
         base_lr = config.lr
-    
+
     params_list = []
     params_list = group_weight(params_list, model, BatchNorm2d, base_lr)
-    
+
     if config.optimizer == 'AdamW':
         optimizer = torch.optim.AdamW(params_list, lr=base_lr, betas=(0.9, 0.999), weight_decay=config.weight_decay)
     elif config.optimizer == 'SGDM':
@@ -75,13 +77,18 @@ with Engine(custom_parser=parser) as engine:
 
     # config lr policy
     total_iteration = config.nepochs * config.niters_per_epoch
-    lr_policy = WarmUpPolyLR(base_lr, config.lr_power, total_iteration, config.niters_per_epoch * config.warm_up_epoch)
+    lr_policy = WarmUpPolyLR(
+        base_lr,
+        config.lr_power,
+        total_iteration,
+        config.niters_per_epoch * config.warm_up_epoch
+    )
 
     if engine.distributed:
         logger.info('.............distributed training.............')
         if torch.cuda.is_available():
             model.cuda()
-            model = DistributedDataParallel(model, device_ids=[engine.local_rank], 
+            model = DistributedDataParallel(model, device_ids=[engine.local_rank],
                                             output_device=engine.local_rank, find_unused_parameters=False)
     else:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -95,7 +102,7 @@ with Engine(custom_parser=parser) as engine:
     optimizer.zero_grad()
     model.train()
     logger.info('begin trainning:')
-    
+
     for epoch in range(engine.state.epoch, config.nepochs+1):
         if engine.distributed:
             train_sampler.set_epoch(epoch)
@@ -109,27 +116,34 @@ with Engine(custom_parser=parser) as engine:
         for idx in pbar:
             engine.update_iteration(epoch, idx)
 
-            minibatch = dataloader.next()
-            imgs = minibatch['data']
-            gts = minibatch['label']
-            modal_xs = minibatch['modal_x']
+            minibatch = next(dataloader)
+            image_rgb = minibatch['image_rgb']
+            polarization_input = minibatch['polarization_input']
+            clean_target = minibatch['clean_target']
 
-            imgs = imgs.cuda(non_blocking=True)
-            gts = gts.cuda(non_blocking=True)
-            modal_xs = modal_xs.cuda(non_blocking=True)
+            if engine.distributed:
+                image_rgb = image_rgb.cuda(non_blocking=True)
+                polarization_input = polarization_input.cuda(non_blocking=True)
+                clean_target = clean_target.cuda(non_blocking=True)
+            else:
+                image_rgb = image_rgb.to(device, non_blocking=True)
+                polarization_input = polarization_input.to(device, non_blocking=True)
+                clean_target = clean_target.to(device, non_blocking=True)
 
-            aux_rate = 0.2
-            loss = model(imgs, modal_xs, gts)
+            # model 只负责完成 RGB+偏振 -> 3 通道恢复图；
+            # loss 在 train.py 中显式计算，训练目标更清晰。
+            restored_rgb = model(image_rgb, polarization_input)
+            loss = criterion(restored_rgb, clean_target)
 
             # reduce the whole loss over multi-gpu
             if engine.distributed:
                 reduce_loss = all_reduce_tensor(loss, world_size=engine.world_size)
-            
+
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-            current_idx = (epoch- 1) * config.niters_per_epoch + idx 
+            current_idx = (epoch- 1) * config.niters_per_epoch + idx
             lr = lr_policy.get_lr(current_idx)
 
             for i in range(len(optimizer.param_groups)):
@@ -142,15 +156,17 @@ with Engine(custom_parser=parser) as engine:
                         + ' lr=%.4e' % lr \
                         + ' loss=%.4f total_loss=%.4f' % (reduce_loss.item(), (sum_loss / (idx + 1)))
             else:
-                sum_loss += loss
+                loss_value = loss.item()
+                sum_loss += loss_value
                 print_str = 'Epoch {}/{}'.format(epoch, config.nepochs) \
                         + ' Iter {}/{}:'.format(idx + 1, config.niters_per_epoch) \
                         + ' lr=%.4e' % lr \
-                        + ' loss=%.4f total_loss=%.4f' % (loss, (sum_loss / (idx + 1)))
+                        + ' loss=%.4f total_loss=%.4f' % (loss_value, (sum_loss / (idx + 1)))
 
             del loss
+            del restored_rgb
             pbar.set_description(print_str, refresh=False)
-        
+
         if (engine.distributed and (engine.local_rank == 0)) or (not engine.distributed):
             tb.add_scalar('train_loss', sum_loss / len(pbar), epoch)
 
