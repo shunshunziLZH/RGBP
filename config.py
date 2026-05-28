@@ -93,7 +93,8 @@ C.norm_std = np.array([0.229, 0.224, 0.225])
 C.model_name = 'RGBPolarRestoration_MiT-B2_RestorationHead'
 C.pretrained_model = C.root_dir + '/pretrained/segformer/mit_b2.pth'
 C.x_input_channels = 9
-C.restoration_head_embed_dim = 256
+# U-Net 风格恢复 decoder 的统一通道数。update.md 建议第一版使用 64 或 96。
+C.restoration_head_embed_dim = 96
 C.optimizer = 'AdamW'
 
 """Train Config"""

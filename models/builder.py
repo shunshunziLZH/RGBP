@@ -1,5 +1,4 @@
 import torch.nn as nn
-import torch.nn.functional as F
 
 from utils.init_func import init_weight
 
@@ -55,7 +54,9 @@ class EncoderDecoder(nn.Module):
             in_channels=self.channels,
             out_channels=cfg.output_channels,
             norm_layer=norm_layer,
-            embed_dim=cfg.restoration_head_embed_dim
+            embed_dim=cfg.restoration_head_embed_dim,
+            rgb_mean=cfg.norm_mean,
+            rgb_std=cfg.norm_std
         )
 
         self.init_weights(cfg, pretrained=cfg.pretrained_model)
@@ -79,7 +80,6 @@ class EncoderDecoder(nn.Module):
         当前数据集中，x 的期望 shape 是 [B, 9, H, W]，
         由 Polar/0.jpg、Polar/60.jpg、Polar/120.jpg 的 RGB 通道拼接得到。
         """
-        orisize = rgb.shape
         # 在进入 backbone 前先检查通道数。
         # 如果 dataloader 或 config 配置错了，这里会直接报出清楚的错误。
         if x.shape[1] != self.x_input_channels:
@@ -91,10 +91,11 @@ class EncoderDecoder(nn.Module):
         # 将 9 通道偏振输入适配为继承 backbone 当前能接收的 3 通道输入。
         x = self.x_input_adapter(x)
         features = self.backbone(rgb, x)
-        out = self.restoration_head(features)
-        # RestorationHead 输出为 1/4 尺度，这里上采样回输入尺寸，
-        # 保证 pred 和 clean_target 可以逐像素计算 L1Loss。
-        out = F.interpolate(out, size=orisize[2:], mode='bilinear', align_corners=False)
+        # 新 decoder 是 U-Net 风格逐级上采样恢复头，内部会：
+        #   1. 融合 F4/F3/F2/F1；
+        #   2. 上采样到 rgb 原图大小；
+        #   3. 将归一化 rgb 反归一化后做 residual learning。
+        out = self.restoration_head(features, rgb)
         return out
 
     def forward(self, rgb, x):
