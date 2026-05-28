@@ -29,8 +29,18 @@ C.abs_dir = osp.realpath(".")
 # 后果：
 # dataloader 不再读取旧的 rgb_root / x_root / gt_root / label mask；
 # 这里只保留当前数据集根目录和 metadata.csv 入口。
-C.dataset_name = 'MyRGBP_by_scene'
-C.dataset_path = osp.join(C.root_dir, 'datasets', C.dataset_name)
+#
+# 数据目录约定：
+#   项目目录的上级的上级目录下有 DATA/RGBP。
+#   例如当前项目在 D:/CODE/RGBP_restoration，则数据在 D:/DATA/RGBP。
+#
+# 使用相对路径的原因：
+#   1. 项目移动到别的机器或别的盘符时，只要仍保持 “项目/../../DATA/RGBP”
+#      这个相对位置关系，就不需要改绝对路径；
+#   2. 训练代码和 dataloader 都从 config.metadata_source 获取入口，
+#      因此全项目只需要维护这一处数据路径。
+C.dataset_name = 'RGBP'
+C.dataset_path = osp.normpath(osp.join(C.root_dir, '..', '..', 'DATA', C.dataset_name))
 C.metadata_source = osp.join(C.dataset_path, 'metadata.csv')
 
 # 数据集划分策略：

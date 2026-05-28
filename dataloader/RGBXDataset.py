@@ -233,22 +233,18 @@ class RGBXDataset(data.Dataset):
         if metadata_path and os.path.isfile(metadata_path):
             return metadata_path
 
-        # 如果没有显式传入，则先找默认目录，再扫描 datasets 下的一级子目录。
-        # 这只是为了提高路径容错，不表示兼容旧数据格式。
-        candidates = [
-            os.path.join(os.getcwd(), 'datasets', 'MyRGBP_by_scene', 'metadata.csv')
-        ]
+        # 如果没有显式传入，则按当前项目约定查找相对路径：../../DATA/RGBP/metadata.csv。
+        # 前因：数据集永远放在项目上级的上级目录 DATA/RGBP 下。
+        # 后果：项目目录可以移动，只要相对位置不变，就不需要改绝对路径。
+        candidate = os.path.normpath(
+            os.path.join(os.getcwd(), '..', '..', 'DATA', 'RGBP', 'metadata.csv')
+        )
+        if os.path.isfile(candidate):
+            return candidate
 
-        datasets_dir = os.path.join(os.getcwd(), 'datasets')
-        if os.path.isdir(datasets_dir):
-            for name in os.listdir(datasets_dir):
-                candidates.append(os.path.join(datasets_dir, name, 'metadata.csv'))
-
-        for candidate in candidates:
-            if os.path.isfile(candidate):
-                return candidate
-
-        raise FileNotFoundError('metadata.csv not found in datasets directory')
+        raise FileNotFoundError(
+            'metadata.csv not found. Expected relative path: ../../DATA/RGBP/metadata.csv'
+        )
 
     def _get_polar_clean_samples(self):
         # metadata.csv 每行对应一个 scene/sample。
