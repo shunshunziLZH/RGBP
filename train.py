@@ -30,6 +30,8 @@ os.environ['MASTER_PORT'] = '169710'
 with Engine(custom_parser=parser) as engine:
     args = parser.parse_args()
 
+    # 固定随机种子，保证同一份配置下训练过程尽量可复现。
+    # 分布式训练时每个 rank 使用不同 seed，避免所有进程采样完全一致。
     cudnn.benchmark = True
     seed = config.seed
     if engine.distributed:
@@ -39,9 +41,15 @@ with Engine(custom_parser=parser) as engine:
         torch.cuda.manual_seed(seed)
 
     # data loader
+    # 当前 DataLoader 输出三个核心张量：
+    #   image_rgb:          退化 RGB 输入，[B, 3, H, W]
+    #   polarization_input: 偏振输入，[B, 9, H, W]
+    #   clean_target:       清晰监督图，[B, 3, H, W]
     train_loader, train_sampler = get_train_loader(engine, RGBXDataset)
 
     if (engine.distributed and (engine.local_rank == 0)) or (not engine.distributed):
+        # TensorBoard 日志目录由 config.log_dir 派生。
+        # engine.link_tb 会维护一个 tb 软链接/快捷入口，方便查看最新日志。
         tb_dir = config.tb_dir + '/{}'.format(time.strftime("%b%d_%d-%H-%M", time.localtime()))
         generate_tb_dir = config.tb_dir + '/tb'
         tb = SummaryWriter(log_dir=tb_dir)
@@ -58,9 +66,15 @@ with Engine(custom_parser=parser) as engine:
     else:
         BatchNorm2d = nn.BatchNorm2d
 
+    # 模型接口固定为 model(rgb, x)：
+    #   rgb -> image_rgb
+    #   x   -> polarization_input
+    # 模型只输出 restored_rgb，不在模型内部计算 loss。
     model = restoration_model(cfg=config, norm_layer=BatchNorm2d)
 
-    # group weight and config optimizer
+    # 按照原项目的参数分组方式设置 optimizer：
+    #   Conv/Linear 权重使用 weight_decay
+    #   Norm/bias 不使用 weight_decay
     base_lr = config.lr
     if engine.distributed:
         base_lr = config.lr
@@ -75,7 +89,8 @@ with Engine(custom_parser=parser) as engine:
     else:
         raise NotImplementedError
 
-    # config lr policy
+    # 学习率策略沿用原项目 WarmUpPolyLR。
+    # total_iteration = 总 epoch 数 * 每个 epoch 的 iteration 数。
     total_iteration = config.nepochs * config.niters_per_epoch
     lr_policy = WarmUpPolyLR(
         base_lr,
@@ -84,6 +99,9 @@ with Engine(custom_parser=parser) as engine:
         config.niters_per_epoch * config.warm_up_epoch
     )
 
+    # 设备放置：
+    #   分布式：模型包进 DistributedDataParallel
+    #   单进程：放到 cuda 或 cpu
     if engine.distributed:
         logger.info('.............distributed training.............')
         if torch.cuda.is_available():
@@ -99,6 +117,9 @@ with Engine(custom_parser=parser) as engine:
     if engine.continue_state_object:
         engine.restore_checkpoint()
 
+    # 开始训练。当前任务的训练目标非常直接：
+    #   pred = model(image_rgb, polarization_input)
+    #   loss = L1Loss(pred, clean_target)
     optimizer.zero_grad()
     model.train()
     logger.info('begin trainning:')
@@ -121,6 +142,8 @@ with Engine(custom_parser=parser) as engine:
             polarization_input = minibatch['polarization_input']
             clean_target = minibatch['clean_target']
 
+            # 将三路张量移动到当前训练设备。
+            # clean_target 已经是 float 图像张量，不能再做 long()。
             if engine.distributed:
                 image_rgb = image_rgb.cuda(non_blocking=True)
                 polarization_input = polarization_input.cuda(non_blocking=True)
@@ -135,7 +158,7 @@ with Engine(custom_parser=parser) as engine:
             restored_rgb = model(image_rgb, polarization_input)
             loss = criterion(restored_rgb, clean_target)
 
-            # reduce the whole loss over multi-gpu
+            # 多 GPU 时，把各进程 loss 做一次 all-reduce，用于日志显示。
             if engine.distributed:
                 reduce_loss = all_reduce_tensor(loss, world_size=engine.world_size)
 
@@ -146,6 +169,7 @@ with Engine(custom_parser=parser) as engine:
             current_idx = (epoch- 1) * config.niters_per_epoch + idx
             lr = lr_policy.get_lr(current_idx)
 
+            # 每个 iteration 后更新 optimizer 的学习率。
             for i in range(len(optimizer.param_groups)):
                 optimizer.param_groups[i]['lr'] = lr
 
@@ -168,9 +192,11 @@ with Engine(custom_parser=parser) as engine:
             pbar.set_description(print_str, refresh=False)
 
         if (engine.distributed and (engine.local_rank == 0)) or (not engine.distributed):
+            # TensorBoard 中记录每个 epoch 的平均 L1Loss。
             tb.add_scalar('train_loss', sum_loss / len(pbar), epoch)
 
         if (epoch >= config.checkpoint_start_epoch) and (epoch % config.checkpoint_step == 0) or (epoch == config.nepochs):
+            # 按 config 中的 checkpoint 策略保存模型和 optimizer 状态。
             if engine.distributed and (engine.local_rank == 0):
                 engine.save_and_link_checkpoint(config.checkpoint_dir,
                                                 config.log_dir,
