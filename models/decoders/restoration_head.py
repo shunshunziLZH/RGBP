@@ -62,7 +62,7 @@ class RestorationHead(nn.Module):
         4. 残差输出：预测 residual，加回输入 RGB，再 clamp 到 [0, 1]。
 
     注意：
-        dataloader 送进模型的 image_rgb 已经做过 ImageNet mean/std 标准化。
+        dataloader 送进模型的 image_rgb 已经按 config.norm_mean / norm_std 标准化。
         clean_target 是 [0, 1]。因此 residual learning 前必须先把 rgb 反归一化回 [0, 1]，
         否则 RGB_input + residual 的数值空间会错。
     """
@@ -81,9 +81,9 @@ class RestorationHead(nn.Module):
         self.decoder_dim = embed_dim
 
         if rgb_mean is None:
-            rgb_mean = [0.485, 0.456, 0.406]
+            rgb_mean = [0.5, 0.5, 0.5]
         if rgb_std is None:
-            rgb_std = [0.229, 0.224, 0.225]
+            rgb_std = [0.5, 0.5, 0.5]
 
         self.register_buffer(
             'rgb_mean',

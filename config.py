@@ -78,10 +78,13 @@ C.output_channels = 3
 """Image Config"""
 C.image_height = 256
 C.image_width = 256
-# image_rgb 使用 3 通道 RGB mean/std；
+# image_rgb 使用 3 通道 mean/std 做输入标准化。
+# 当前不使用 ImageNet 统计量，而是使用 0.5 / 0.5：
+#   input = image / 255.0
+#   normalized = (input - 0.5) / 0.5
+# 这样网络输入范围大致为 [-1, 1]。
 # polarization_input 是 9 通道，dataloader 会把这里的 mean/std 重复 3 次后使用。
-# C.norm_mean = np.array([0.485, 0.456, 0.406])
-# C.norm_std = np.array([0.229, 0.224, 0.225])
+# clean_target 不做 mean/std 标准化，只保持 [0, 1] 用于 L1Loss。
 C.norm_mean = np.array([0.5, 0.5, 0.5])
 C.norm_std = np.array([0.5, 0.5, 0.5])
 

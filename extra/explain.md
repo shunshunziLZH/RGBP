@@ -129,7 +129,7 @@ clean_target
 | --- | --- | --- |
 | 1 | `random_mirror` | 三路同步水平翻转 |
 | 2 | `random_scale` | 三路同步缩放，图像任务统一用双线性插值 |
-| 3 | `normalize` | 输入做 mean/std 标准化，target 只缩放到 `[0, 1]` |
+| 3 | `normalize` | 输入用 `0.5 / 0.5` 标准化到约 `[-1, 1]`，target 只缩放到 `[0, 1]` |
 | 4 | `random crop/pad` | 三路共用同一个 `crop_pos` |
 | 5 | `HWC -> CHW` | 适配 PyTorch Conv2d |
 
@@ -139,8 +139,8 @@ clean_target
 C.image_height = 256
 C.image_width = 256
 C.train_scale_array = [0.5, 0.75, 1, 1.25, 1.5, 1.75]
-C.norm_mean = np.array([0.485, 0.456, 0.406])
-C.norm_std = np.array([0.229, 0.224, 0.225])
+C.norm_mean = np.array([0.5, 0.5, 0.5])
+C.norm_std = np.array([0.5, 0.5, 0.5])
 ```
 
 调控建议：
@@ -149,7 +149,7 @@ C.norm_std = np.array([0.229, 0.224, 0.225])
 | --- | --- |
 | 降低训练显存 | 降低 `C.image_height / C.image_width` |
 | 小样本过拟合调试 | 把 `C.train_scale_array` 改成 `[1]` 或 `None` |
-| 修改输入归一化 | 改 `C.norm_mean / C.norm_std`，偏振 9 通道会自动重复 RGB 统计量 |
+| 修改输入归一化 | 改 `C.norm_mean / C.norm_std`，当前默认是 `[0.5, 0.5, 0.5]`；偏振 9 通道会自动重复 RGB 统计量 |
 
 ## 5. 模型结构
 
@@ -261,7 +261,7 @@ loss = criterion(restored_rgb, clean_target)
 | 张量 | 数值处理 |
 | --- | --- |
 | `clean_target` | `clean_target / 255.0` |
-| `restored_rgb` | 输入 RGB 反归一化到 `[0, 1]`，加 residual，再 clamp 到 `[0, 1]` |
+| `restored_rgb` | 输入 RGB 按 `C.norm_mean / C.norm_std` 反归一化到 `[0, 1]`，加 residual，再 clamp 到 `[0, 1]` |
 
 这样 `L1Loss` 的含义就是平均像素绝对误差。
 
