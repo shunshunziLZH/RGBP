@@ -114,8 +114,8 @@ class TrainPre(object):
 
 class ValPre(object):
     def __call__(self, degraded_input, clean_target, polarization_input):
-        # 验证阶段不做随机增强，保持原始图像尺寸和内容。
-        # 当前 eval.py 仍是旧分割评估流程，后续若重写恢复评估，再在这里补恢复任务需要的确定性预处理。
+        # 验证/测试阶段不做随机增强，保持原始图像尺寸和内容。
+        # 当前 eval.py 会在评估入口中完成 normalize、HWC->CHW 和 tensor 转换。
         return degraded_input, clean_target, polarization_input
 
 def get_train_loader(engine, dataset):

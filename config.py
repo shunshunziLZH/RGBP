@@ -115,11 +115,16 @@ C.bn_eps = 1e-3
 C.bn_momentum = 0.1
 
 """Eval Config"""
-C.eval_iter = 25
+# 当前 eval.py 是轻量滑窗恢复评估：
+#   1. 按 eval_crop_size 裁剪 RGB / polarization patch；
+#   2. 用 eval_stride_rate 控制窗口重叠；
+#   3. patch 预测结果累加平均，拼回整张恢复图；
+#   4. 计算 L1 / PSNR，按需保存恢复图。
+#
+# 前因：整图推理在大图上更吃显存。
+# 后果：保留滑窗推理，但删除多尺度和 flip test，避免 eval 入口变臃肿。
 C.eval_stride_rate = 2 / 3
-C.eval_scale_array = [1] # [0.75, 1, 1.25] #
-C.eval_flip = False # True #
-C.eval_crop_size = [480, 640] # [height weight]
+C.eval_crop_size = [256, 256] # [height, width]
 
 """Store Config"""
 C.checkpoint_start_epoch = 250
