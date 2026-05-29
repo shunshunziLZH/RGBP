@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 import time
 from tqdm import tqdm
-from timm.models.layers import to_2tuple
+from timm.layers import to_2tuple
 
 import torch
 import multiprocessing as mp

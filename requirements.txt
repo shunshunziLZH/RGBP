@@ -1,8 +1,22 @@
-#torch==1.8.2+cu102
-#cudnn==7.6.5
+# Recommended Python version:
+#   Python 3.12
+#
+# Why:
+#   This project now targets a newer PyTorch / timm environment. New PyTorch
+#   releases support Python 3.12, and the code has been updated from the old
+#   timm.models.layers import path to the newer timm.layers path.
+#
+# PyTorch should be installed according to your CUDA version before installing
+# this file. Example for CUDA 12.1:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#
+# CPU-only example:
+#   pip install torch torchvision
+
+numpy>=1.26.0
 easydict>=1.9
-opencv-python>=4.5.0
-timm>=0.4.10
-scipy>=1.7.0
-tqdm>=4.40.0
-tensorboardX>=2.2
+opencv-python>=4.8.0
+timm>=0.9.0
+scipy>=1.11.0
+tqdm>=4.66.0
+tensorboardX>=2.6.0
