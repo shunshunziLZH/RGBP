@@ -80,8 +80,10 @@ C.image_height = 256
 C.image_width = 256
 # image_rgb 使用 3 通道 RGB mean/std；
 # polarization_input 是 9 通道，dataloader 会把这里的 mean/std 重复 3 次后使用。
-C.norm_mean = np.array([0.485, 0.456, 0.406])
-C.norm_std = np.array([0.229, 0.224, 0.225])
+# C.norm_mean = np.array([0.485, 0.456, 0.406])
+# C.norm_std = np.array([0.229, 0.224, 0.225])
+C.norm_mean = np.array([0.5, 0.5, 0.5])
+C.norm_std = np.array([0.5, 0.5, 0.5])
 
 """Model Config"""
 # 当前 builder.py 不再根据 config 选择 backbone / decoder。
@@ -107,7 +109,7 @@ C.nepochs = 500
 # 由 get_train_loader 根据随机划分后的 train split 自动设置。
 C.niters_per_epoch = None
 C.num_workers = 16
-C.train_scale_array = [0.5, 0.75, 1, 1.25, 1.5, 1.75]
+C.train_scale_array = [1.0]
 C.warm_up_epoch = 10
 
 C.fix_bias = True
